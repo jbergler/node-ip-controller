@@ -47,7 +47,7 @@ spec:
       serviceAccountName: node-ip-controller
       containers:
       - name: node-ip-controller
-        image: gcr.io/jonasbergler-com/node-ip-controller:v1.0
+        image: gcr.io/jonasbergler-com/node-ip-controller:v1.1
         imagePullPolicy: Always
         volumeMounts:
           - mountPath: /secret/dns
@@ -57,6 +57,21 @@ spec:
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS
             value: /secret/dns/key.json
+          - name: GCP_PROJECT_ID
+            valueFrom:
+              configMapKeyRef:
+                name: config
+                key: project
+          - name: GCP_DNS_ZONE
+            valueFrom:
+              configMapKeyRef:
+                name: config
+                key: zone
+          - name: GCP_DNS_DOMAIN
+            valueFrom:
+              configMapKeyRef:
+                name: config
+                key: domain
       volumes:
         - name: secret-dns
           secret:

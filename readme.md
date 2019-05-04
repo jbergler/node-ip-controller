@@ -52,3 +52,10 @@ And now we're ready to deploy things to kubernetes.
 ```
 kubectl apply -f deploy.yml
 ```
+
+Lastly, we need to ensure the configuration is correct.
+```
+# edit config.yml, then
+kubectl apply -f config.yml
+```
+

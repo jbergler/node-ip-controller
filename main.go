@@ -2,6 +2,7 @@ package main
 
 import (
   "flag"
+  "os"
   "sort"
   "strings"
   "time"
@@ -28,9 +29,9 @@ var settings = struct {
 }{
   kubeConfig:  "",
   masterUrl:   "",
-  project:     "jonasbergler-com",
-  zone:        "primary-zone",
-  domain:      "k8s.jonasbergler.com.",
+  project:     os.Getenv("GCP_PROJECT_ID"),
+  zone:        os.Getenv("GCP_DNS_ZONE"),
+  domain:      os.Getenv("GCP_DNS_DOMAIN"),
   ttl:         60,
 }
 
@@ -149,6 +150,8 @@ func main() {
 
 func init() {
   flag.StringVar(&settings.kubeConfig, "kubeconfig", settings.kubeConfig, "Provide the `path` to a kubeconfig.")
+  flag.StringVar(&settings.project, "project", settings.project, "GCP project ID")
+  flag.StringVar(&settings.zone, "zone", settings.zone, "GCP DNS zone name")
   flag.StringVar(&settings.domain, "domain", settings.domain, "FQDN to update.")
   klog.InitFlags(nil)
 }
