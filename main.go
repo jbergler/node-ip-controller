@@ -14,16 +14,24 @@ import (
   "k8s.io/client-go/informers"
   "k8s.io/client-go/tools/cache"
   api_core_v1 "k8s.io/api/core/v1"
+
+  "github.com/jbergler/node-ip-controller/dns"
 )
 
 var settings = struct {
   kubeConfig   string
   masterUrl    string
+  project      string
+  zone         string
   domain       string
+  ttl          int64
 }{
   kubeConfig:  "",
   masterUrl:   "",
-  domain:      "jonasbergler.com",
+  project:     "jonasbergler-com",
+  zone:        "primary-zone",
+  domain:      "k8s.jonasbergler.com.",
+  ttl:         60,
 }
 
 var (
@@ -51,32 +59,74 @@ func main() {
   factory := informers.NewSharedInformerFactory(client, time.Minute)
   lister := factory.Core().V1().Nodes().Lister()
 
-  var seenIps []string
+  var cachedDnsIps []string
+  var cachedDnsTs int64
+
+  dnsClient, err := dns.New(settings.project, settings.zone)
+  if err != nil {
+    klog.Exitf("Error initializing DNS Client: %s", err.Error())
+    return
+  }
 
   update := func() {
-    klog.Infoln("Update() running.")
+    klog.V(3).Infoln("Update() running.")
     nodes, err := lister.List(nodeSelector)
     if err != nil {
-      klog.Infoln("failed to list nodes", err)
+      klog.Errorf("Error listing Nodes: %s", err.Error())
     }
 
-    var currentIps []string
+    var currentLocalIps []string
     for _, node := range nodes {
       if !nodeOk(node) { continue }
 
       for _, address := range node.Status.Addresses {
         if address.Type == api_core_v1.NodeExternalIP {
-          currentIps = append(currentIps, address.Address)
+          currentLocalIps = append(currentLocalIps, address.Address)
         }
       }
     }
 
-    sort.Strings(currentIps)
-    if strings.Join(currentIps, ",") == strings.Join(seenIps, ",") {
-      klog.Infoln("no changes detected")
+    if cachedDnsTs == 0 || (cachedDnsTs + 300) < time.Now().Unix() {
+      record, err := dnsClient.GetRecord(settings.domain, "A")
+
+      if err != nil {
+        klog.Errorf("Error getting DNS Record: %s", err.Error())
+        return
+      }
+      if record != nil {
+        cachedDnsIps = record.Data
+        sort.Strings(cachedDnsIps)
+        cachedDnsTs = time.Now().Unix()
+        klog.V(0).Infof("Updated DNS cache: %v := %v", cachedDnsTs, cachedDnsIps)
+      }
+    }
+
+    sort.Strings(currentLocalIps)
+    if strings.Join(currentLocalIps, ",") == strings.Join(cachedDnsIps, ",") {
+      klog.V(2).Infoln("No changes detected")
+      return
     } else {
-      klog.Infof("new ips detected: %v", currentIps)
-      seenIps = currentIps
+      klog.V(1).Infof("Detected a change in Node IPs:\n\told: %v\n\tnew: %v", cachedDnsIps, currentLocalIps)
+    }
+
+    old_record := &dns.Record{
+      Name: settings.domain,
+      Type: "A",
+      Ttl: settings.ttl,
+      Data: cachedDnsIps,
+    }
+    new_record := &dns.Record{
+      Name: settings.domain,
+      Type: "A",
+      Ttl: settings.ttl,
+      Data: currentLocalIps,
+    }
+    err = dnsClient.ChangeRecord(new_record, old_record)
+    if err != nil {
+      klog.Errorf("Error updating DNS: %s", err.Error())
+    } else {
+      cachedDnsTs = 0
+      klog.V(1).Infoln("DNS updated successfully")
     }
   }
 
@@ -100,6 +150,7 @@ func main() {
 func init() {
   flag.StringVar(&settings.kubeConfig, "kubeconfig", settings.kubeConfig, "Provide the `path` to a kubeconfig.")
   flag.StringVar(&settings.domain, "domain", settings.domain, "FQDN to update.")
+  klog.InitFlags(nil)
 }
 
 func nodeOk(node *api_core_v1.Node) bool {
